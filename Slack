@@ -1,0 +1,289 @@
+var slackEndpoint = "Slack";
+var slackToken = constants["Slack Token"];
+
+/**
+* Sets the endpoint and token for target Slack instance
+* @param {String} endpoint - name of endpoint configured in the Comm Plan
+* @param {String} token - authentication token for Slack
+*/
+exports.setInstance = function(endpoint, token) {
+    slackEndpoint = encodeURIComponent(endpoint);
+    slackToken = encodeURIComponent(token);
+}
+
+/**
+* Returns true is endpoint and token are set
+* @return {Boolean} result - true is endpoint and token are set, false otherwise
+*/
+ exports.isInstanceValid = function() {
+    if (slackEndpoint == null || slackEndpoint == "") {
+        console.log("Slack endpoint is not set");
+        return false;
+    }
+    
+    if (slackToken == null || slackToken == "") {
+        console.log("Slack Token is not set");
+        return false; 
+    }
+    return true;
+}
+
+/**
+* Returns the ID of a channel given the channel name
+* @param {String} channelName
+* @return {String} channelId
+*/
+exports.getChannelId = function(channelName) {
+    if (!this.isInstanceValid()) { return null }    
+    var request = http.request({
+        'endpoint': slackEndpoint,
+        'method': 'GET',
+        'path': 'api/channels.list?token=' + slackToken + '&exclude_archived=1',
+    });
+
+    var response = request.write();
+    if (response.status < 200 || response.status > 299) {
+        console.log("Slack getChannelId response code = " + response.status);
+        return null;
+    }
+    var json = JSON.parse(response.body);
+
+    var channelId = null;
+    for (var i = 0; i < json.channels.length; i++) {
+        if (json.channels[i].name == channelName) {
+            channelId = json.channels[i].id;
+            break;
+        }
+    }
+
+    return channelId;
+}
+
+/**
+* Returns the user ID of a user given the user name
+* @param {String} userName
+* @return {String} userId
+*/
+exports.getUserId = function(userName) {
+    if (!this.isInstanceValid()) { return null }
+    var request = http.request({
+        'endpoint': slackEndpoint,
+        'method': 'GET',
+        'path': 'api/users.list?token=' + slackToken,
+    });
+
+    var response = request.write();
+    if (response.status < 200 || response.status > 299) {
+        console.log("Slack getUserId response code = " + response.status);
+        return null;
+    }
+
+    var json = JSON.parse(response.body);
+
+    var userId = null;
+    for (var i = 0; i < json.members.length; i++) {
+        if (json.members[i].name == userName) {
+            userId = json.members[i].id;
+            break;
+        }
+    }
+
+    return userId;
+}
+
+/**
+* Returns the name of a user given the user ID
+* @param {String} userId
+* @return {String} userName
+*/
+exports.getUserName = function(userId) {
+    if (!this.isInstanceValid()) { return null }
+    userId = encodeURIComponent(userId);
+
+    var request = http.request({
+        'endpoint': slackEndpoint,
+        'method': 'GET',
+        'path': 'api/users.info?token=' + slackToken + '&user=' + userId,
+    });
+
+    var response = request.write();
+    if (response.status < 200 || response.status > 299) {
+        console.log("Slack getUserName response code = " + response.status);
+        return null;
+    }
+
+    var json = JSON.parse(response.body);
+    return json.user.name;
+}
+
+
+/**
+* Creates a channel with the given channel name
+* @param {String} channelName
+* @return {String} channelId
+*/
+exports.createChannel = function(channelName) {
+    channelName = encodeURIComponent(channelName);
+
+    var request = http.request({
+        'endpoint': slackEndpoint,
+        'method': 'POST',
+        'path': 'api/channels.create?token=' + slackToken + '&name=' + channelName,
+    });
+
+    var response = request.write();
+    if (response.status < 200 || response.status > 299) {
+        console.log("Slack createChannel response code = " + response.status);
+        return null;
+    }
+
+    var json = JSON.parse(response.body);
+    return json.channel.id
+}
+
+
+/**
+* Invites a user to a channel
+* @param {String} userName
+* @param {String} channelName
+* @return {Boolean} result - true if successful, false otherwise
+*/
+exports.inviteUserToChannel = function(userName, channelName) {
+    if (!this.isInstanceValid()) { return null }    
+    var channelId = this.getChannelId(channelName);
+    if (channelId == null) {
+        console.log("Slack inviteUserToChannel channel not found: " + channelName);
+        return false;
+    }
+
+    var userId = this.getUserId(userName)
+    if (userId == null) {
+        console.log("Slack inviteUserToChannel user not found: " + userName);
+        return false;
+    }
+
+    var request = http.request({
+        'endpoint': slackEndpoint,
+        'method': 'POST',
+        'path': 'api/channels.invite?token=' + slackToken + '&channel=' + channelId + "&user=" + userId,
+    });
+
+    var response = request.write();
+    if (response.status < 200 || response.status > 299) {
+        console.log("Slack inviteUserToChannel response code = " + response.status);
+        return false;
+    }
+    return true;
+}
+
+/**
+* Returns the message history of a channel given the name
+* @param {String} channelName
+* @return {String} - channel history
+*/
+exports.getChannelHistory = function(channelName) {
+    if (!this.isInstanceValid()) { return null }    
+    var userNames = {}
+    var channelId = this.getChannelId(channelName);
+    if (channelId == null) {
+        console.log("Slack inviteUserToChannel channel not found: " + channelName);
+        return null;
+    }
+
+	var request = http.request({
+        'endpoint': slackEndpoint,
+        'method': 'GET',
+        'path': 'api/channels.history?token=' + slackToken + '&channel=' + channelId,
+    });
+
+    var response = request.write();
+    var json = JSON.parse(response.body);
+
+    var history = "";
+    var userName, userId;
+    for (var i = json.messages.length - 1; i >=0 ; i--) {
+        if (json.messages[i].type == "message" && !json.messages[i].subtype) {
+            userId = json.messages[i].user;
+            
+            userName = userNames[userId]
+            if (userNames[userId] == null) {
+                userName = this.getUserName(userId);
+                userNames[userId] = userName;
+            }
+            var message = json.messages[i].text;
+            var mentions = message.match(/(<@.*?>)/g)
+            if (mentions != null) {
+                for (var j = 0; j < mentions.length; j++) {
+                    userId = mentions[j].slice(2, mentions[j].length-1);
+                    mentionName = userNames[userId]
+                    if (userNames[userId] == null) {
+                        mentionName = this.getUserName(userId);
+                        userNames[userId] = mentionName;
+                    }     
+                    message = message.replace(mentions[j], "@" + mentionName)
+                }
+            }
+            history += "\n[" + userName + "] " + message;
+            
+        }
+    }
+    return history;
+}
+
+/**
+* Posts a simple text message to a channel
+* @param {String} channelName
+* @param {String} message
+* @return {Boolean} result - true if successful, false otherwise
+*/
+exports.postMessage = function(channelName, message) {
+    if (!this.isInstanceValid()) { return null }    
+    channelName = encodeURIComponent(channelName);
+    message = encodeURIComponent(message);
+
+    var path = "api/chat.postMessage?token=" + slackToken;
+    path += "&channel=" + channelName + "&text=" + message + "&as_user=true";
+
+	var request = http.request({
+        'endpoint': slackEndpoint,
+        'method': 'POST',
+        'path': path,
+    });
+
+    var response = request.write();
+    if (response.status < 200 || response.status > 299) {
+        console.log("Slack postMessage response code = " + response.status);
+        return false;
+    }
+    return true;
+}
+
+/**
+* Posts a text message with an attachment to a channel
+* @param {String} channelName
+* @param {String} text
+* @param {String} attachments
+* @return {Boolean} result - true if successful, false otherwise
+*/
+exports.postMessageWithAttachments = function(channelName, text, attachments) {
+    if (!this.isInstanceValid()) { return null }    
+    channelName = encodeURIComponent(channelName);
+    text = encodeURIComponent(text);
+    attachments = encodeURIComponent(JSON.stringify(attachments));
+
+    var path = "api/chat.postMessage?token=" + slackToken;
+    path += "&channel=" + channelName + "&as_user=true" + "&text=" + text + "&attachments=" + attachments;
+
+    var request = http.request({
+        'endpoint': slackEndpoint,
+        'method': 'POST',
+        'path': path,
+    });
+
+    var response = request.write();
+    if (response.status < 200 || response.status > 299) {
+        console.log("Slack postMessage response code = " + response.status);
+        return false;
+    }
+    return true;
+}
